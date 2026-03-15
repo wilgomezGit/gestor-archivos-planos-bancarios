@@ -16,8 +16,8 @@
         <!-- Sección carga -->
         <div class="upload-section">
             <label class="file-label">
-                📂 Elegir archivo plano (.txt)
-                <input type="file" id="fileInput" accept=".txt">
+                📂 Elegir archivo plano o Excel
+                <input type="file" id="fileInput" accept=".txt, .xlsx, .xls, .ods">
             </label>
             <div class="file-name" id="fileName">No hay archivos seleccionados</div>
         </div>
@@ -41,7 +41,7 @@
         <h2>Datos Procesados</h2>
         <div class="table-container">
             <table id="dataTable">
-                <thead>
+                <thead id="dataHead">
                     <tr>
                         <th>No.</th>
                         <th>No. Documento</th>
