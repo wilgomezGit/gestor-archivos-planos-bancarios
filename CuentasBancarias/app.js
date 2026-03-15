@@ -7,6 +7,7 @@
 
 let parsedData = [];
 let hasErrors = false;
+let isExcelMode = false;
 
 /* ========================================
    ELEMENTOS DEL DOM
@@ -18,6 +19,7 @@ const btnCancelar = document.getElementById('btnCancelar');
 const btnExcel = document.getElementById('btnExcel');
 const btnSiesa = document.getElementById('btnSiesa');
 const btnPlano = document.getElementById('btnPlano');
+const dataHead = document.getElementById('dataHead');
 const dataBody = document.getElementById('dataBody');
 const downloadButtons = document.getElementById('downloadButtons');
 const errorMessage = document.getElementById('errorMessage');
@@ -183,12 +185,37 @@ function processFile() {
         return;
     }
 
+    const fileName = file.name.toLowerCase();
+    const isExcelFile = fileName.endsWith('.xlsx') || fileName.endsWith('.xls') || fileName.endsWith('.ods');
+
     const reader = new FileReader();
-    reader.onload = function (e) {
-        const content = e.target.result;
-        parseFile(content);
-    };
-    reader.readAsText(file);
+    
+    if (isExcelFile) {
+        reader.onload = function(e) {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: "array" });
+            const firstSheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[firstSheetName];
+            
+            // Get headers from Excel
+            const range = XLSX.utils.decode_range(worksheet["!ref"]);
+            let headers = [];
+            for (let C = range.s.c; C <= range.e.c; ++C) {
+                let cell = worksheet[XLSX.utils.encode_cell({ r: range.s.r, c: C })];
+                headers.push(cell ? cell.v : `Columna ${C}`);
+            }
+            
+            const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+            parseExcelFile(jsonData, headers);
+        };
+        reader.readAsArrayBuffer(file);
+    } else {
+        reader.onload = function (e) {
+            const content = e.target.result;
+            parseFile(content);
+        };
+        reader.readAsText(file);
+    }
 }
 
 /* ========================================
@@ -199,6 +226,7 @@ function parseFile(content) {
     dataBody.innerHTML = '';
     parsedData = [];
     hasErrors = false;
+    isExcelMode = false;
 
     rows.forEach((line, index) => {
         const columns = line.split(',');
@@ -243,31 +271,118 @@ function parseFile(content) {
 }
 
 /* ========================================
+   PARSEAR CONTENIDO DEL EXCEL SIESA
+   ======================================== */
+function parseExcelFile(jsonData, headers) {
+    dataBody.innerHTML = '';
+    parsedData = jsonData;
+    hasErrors = false;
+    isExcelMode = true;
+    
+    // Validamos si tiene datos
+    if(parsedData.length === 0) {
+        alert("El archivo Excel está vacío.");
+        return;
+    }
+
+    // Mapeo opcional para que los títulos se vean mejor en pantalla
+    const excelHeaderAliases = {
+        'Código del proveedor': 'Código Proveedor',
+        'Sucursal del proveedor': 'Sucursal',
+        'Banco del proveedor': 'Banco',
+        'Número de cuenta corriente o de ahorros': 'Número Cuenta',
+        'Tipo de cuenta 1=cta cte 2=cta ahorro': 'Tipo Cuenta',
+        'formato': 'Formato',
+        'forma de pago': 'Forma Pago',
+        'Cuenta por defecto 0= cta reg. no es default, 1=cta reg. es default': 'Cuenta Defecto',
+        'DATO 1': 'DATO 1',
+        'DATO 2': 'DATO 2',
+        'DATO 3': 'DATO 3',
+        'DATO 4': 'DATO 4',
+        'DATO 5': 'DATO 5',
+        'DATO 6': 'DATO 6',
+        'DATO 7': 'DATO 7',
+        'DATO 8': 'DATO 8'
+    };
+
+    // Configurar encabezados dinámicamente
+    dataHead.innerHTML = '';
+    const headerRow = document.createElement('tr');
+    headers.forEach(h => {
+        const th = document.createElement('th');
+        // Usa el alias más corto si existe, de lo contrario usa el original
+        th.textContent = excelHeaderAliases[h] || h;
+        headerRow.appendChild(th);
+    });
+    // Agregar columna de acciones para el Excel también
+    const thA = document.createElement('th');
+    thA.textContent = "Acciones";
+    headerRow.appendChild(thA);
+    dataHead.appendChild(headerRow);
+    
+    renderTable();
+    showDownloadButtons();
+}
+
+/* ========================================
    RENDERIZAR TABLA
    ======================================== */
 function renderTable() {
     dataBody.innerHTML = '';
     hasErrors = false;
 
-    parsedData.forEach((row, idx) => {
-        if (row.hasError) hasErrors = true;
-
-        const tr = document.createElement('tr');
-        if (row.hasError) tr.classList.add('row-error');
-
-        tr.innerHTML = `
-            <td>${idx + 1}</td>
-            <td>${row.numeroDocumento}</td>
-            <td>${row.nombreTitular}</td>
-            <td>${row.noCuenta}</td>
-            <td class="${row.banco === 'DESCONOCIDO' ? 'cell-error' : ''}">${row.banco}</td>
-            <td class="${row.tipoCuenta === 'ERROR' ? 'cell-error' : ''}">${row.tipoCuenta}</td>
-            <td class="${row.tipoDocumento === 'TIPO DESCONOCIDO' ? 'cell-error' : ''}">${row.tipoDocumento}</td>
-            <td><button class="btn-delete-row" onclick="deleteRow(${idx})">🗑️ Eliminar</button></td>
+    if (!isExcelMode) {
+        // Encabezados estándar TXT
+        dataHead.innerHTML = `
+            <tr>
+                <th>No.</th>
+                <th>No. Documento</th>
+                <th>Nombre Titular</th>
+                <th>No. Cuenta</th>
+                <th>Nombre Banco</th>
+                <th>Tipo Cuenta</th>
+                <th>Tipo Documento</th>
+                <th>Acciones</th>
+            </tr>
         `;
+        
+        parsedData.forEach((row, idx) => {
+            if (row.hasError) hasErrors = true;
 
-        dataBody.appendChild(tr);
-    });
+            const tr = document.createElement('tr');
+            if (row.hasError) tr.classList.add('row-error');
+
+            tr.innerHTML = `
+                <td>${idx + 1}</td>
+                <td>${row.numeroDocumento}</td>
+                <td>${row.nombreTitular}</td>
+                <td>${row.noCuenta}</td>
+                <td class="${row.banco === 'DESCONOCIDO' ? 'cell-error' : ''}">${row.banco}</td>
+                <td class="${row.tipoCuenta === 'ERROR' ? 'cell-error' : ''}">${row.tipoCuenta}</td>
+                <td class="${row.tipoDocumento === 'TIPO DESCONOCIDO' ? 'cell-error' : ''}">${row.tipoDocumento}</td>
+                <td><button class="btn-delete-row" onclick="deleteRow(${idx})">🗑️ Eliminar</button></td>
+            `;
+
+            dataBody.appendChild(tr);
+        });
+    } else {
+        // Renderizar Excel
+        let headers = Object.keys(parsedData[0] || {});
+        parsedData.forEach((row, idx) => {
+            const tr = document.createElement('tr');
+            headers.forEach(header => {
+                const td = document.createElement('td');
+                td.textContent = row[header] !== undefined ? row[header] : "";
+                tr.appendChild(td);
+            });
+            // Acciones
+            const tdA = document.createElement('td');
+            tdA.innerHTML = `<button class="btn-delete-row" onclick="deleteRow(${idx})">🗑️ Eliminar</button>`;
+            tr.appendChild(tdA);
+            
+            dataBody.appendChild(tr);
+        });
+    }
 
     updateErrorMessage();
     updateDownloadButtons();
@@ -378,6 +493,11 @@ function triggerTextDownload(textContent, filename) {
 function downloadExcel() {
     if (hasErrors || parsedData.length === 0) return;
 
+    if (isExcelMode) {
+        alert("El archivo subido ya es un Excel.");
+        return;
+    }
+
     const sheetData = [
         ['No.', 'No. DOCUMENTO', 'NOMBRE TITULAR', 'No. CUENTA', 'BANCO', 'TIPO CUENTA', 'TIPO DOCUMENTO']
     ];
@@ -407,6 +527,11 @@ function downloadExcel() {
    ======================================== */
 function downloadSiesa() {
     if (hasErrors || parsedData.length === 0) return;
+
+    if (isExcelMode) {
+       alert("El archivo subido ya tiene el formato Siesa.");
+       return;
+    }
 
     const headers = [
         'Código del proveedor',
@@ -470,90 +595,119 @@ function downloadPlano() {
     if (hasErrors || parsedData.length === 0) return;
 
     let lineas = [];
-
-    // Primera línea fija
     lineas.push("000000100000001001");
 
-    parsedData.forEach((item, index) => {
-        const bancoInfo = bancoSiesaData[item.banco] || { banco: 'ERROR', dato3: '000000000' };
+    if (isExcelMode) {
+        // Generar plano a partir de Excel Siesa
+        parsedData.forEach((row, index) => {
+            let consecutivo = (index + 2).toString();
+            let linea = consecutivo.padStart(7, "0"); // consecutivo de 7 dígitos
+            linea += "0"; // cero fijo
+            linea += "63400020011"; // bloque fijo
 
-        const tipoCuenta =
-            item.tipoCuenta === 'AHORROS' ? '2' :
-                item.tipoCuenta === 'CORRIENTE' ? '1' : 'ERROR';
+            linea += row["Código del proveedor"] || "";
+            linea = linea.padEnd(34, " ");
 
-        let dato2 = 'ERROR';
-        if (item.tipoDocumento === 'CÉDULA CIUDADANÍA') dato2 = '1';
-        else if (item.tipoDocumento === 'NIT') dato2 = '3';
-        else if (item.tipoDocumento === 'CÉDULA EXTRANJERÍA') dato2 = '2';
+            linea += (row["Sucursal del proveedor"] || "");
+            linea += "1";
+            linea += (row["Banco del proveedor"] || "");
 
-        const dato6 =
-            item.tipoCuenta === 'AHORROS' ? '37' :
-                item.tipoCuenta === 'CORRIENTE' ? '27' : 'ERROR';
+            linea += " ".repeat(8);
 
-        let consecutivo = (index + 2).toString();
-        let linea = consecutivo.padStart(7, "0");
-        linea += "0";
-        linea += "63400020011";
+            linea += row["Número de cuenta corriente o de ahorros"] || "";
+            linea = linea.padEnd(78, " ");
 
-        // Código proveedor
-        linea += item.numeroDocumento;
+            linea += row["Tipo de cuenta 1=cta cte 2=cta ahorro"] || "";
+            linea += row["formato"] || "";
+            linea += row["forma de pago"] || "";
+            linea += row["Cuenta por defecto 0= cta reg. no es default, 1=cta reg. es default"] || "";
+            linea += "1";
 
-        // Espacios hasta pos 35
-        linea = linea.padEnd(34, " ");
+            linea += row["DATO 1"] || "";
+            linea = linea.padEnd(140, " ");
+            
+            linea += row["DATO 2"] || "";
+            linea = linea.padEnd(190, " ");
+            
+            linea += row["DATO 3"] || "";
+            linea = linea.padEnd(240, " ");
+            
+            linea += row["DATO 4"] || "";
+            
+            while (linea.length < 340) linea += " ";
+            linea += row["DATO 6"] || "";
 
-        // Sucursal + "1" + Banco
-        linea += "001";
-        linea += "1";
-        linea += bancoInfo.banco;
+            linea = linea.padEnd(440, " ");
+            linea += row["DATO 8"] || "";
 
-        // 8 espacios
-        linea += " ".repeat(8);
+            linea = linea.padEnd(840, " ");
+            lineas.push(linea);
+        });
 
-        // Número de cuenta
-        linea += item.noCuenta;
+    } else {
+        // Generar plano a partir de TXT
+        parsedData.forEach((item, index) => {
+            const bancoInfo = bancoSiesaData[item.banco] || { banco: 'ERROR', dato3: '000000000' };
 
-        // Hasta pos 79
-        linea = linea.padEnd(78, " ");
+            const tipoCuenta =
+                item.tipoCuenta === 'AHORROS' ? '2' :
+                    item.tipoCuenta === 'CORRIENTE' ? '1' : 'ERROR';
 
-        // Tipo cuenta + formato + forma de pago + cuenta por defecto
-        linea += tipoCuenta;
-        linea += "00000509";
-        linea += "1";
-        linea += "1";
+            let dato2 = 'ERROR';
+            if (item.tipoDocumento === 'CÉDULA CIUDADANÍA') dato2 = '1';
+            else if (item.tipoDocumento === 'NIT') dato2 = '3';
+            else if (item.tipoDocumento === 'CÉDULA EXTRANJERÍA') dato2 = '2';
 
-        // fijo "1"
-        linea += "1";
+            const dato6 =
+                item.tipoCuenta === 'AHORROS' ? '37' :
+                    item.tipoCuenta === 'CORRIENTE' ? '27' : 'ERROR';
 
-        // DATO 1
-        linea += item.numeroDocumento;
+            let consecutivo = (index + 2).toString();
+            let linea = consecutivo.padStart(7, "0");
+            linea += "0";
+            linea += "63400020011";
 
-        // Hasta pos 141
-        linea = linea.padEnd(140, " ");
-        linea += dato2;
+            linea += item.numeroDocumento;
+            linea = linea.padEnd(34, " ");
 
-        // Hasta pos 191
-        linea = linea.padEnd(190, " ");
-        linea += bancoInfo.dato3;
+            linea += "001";
+            linea += "1";
+            linea += bancoInfo.banco;
 
-        // Hasta pos 241
-        linea = linea.padEnd(240, " ");
-        linea += item.noCuenta;
+            linea += " ".repeat(8);
 
-        // Hasta pos 341 con espacios
-        while (linea.length < 340) linea += " ";
-        linea += dato6;
+            linea += item.noCuenta;
+            linea = linea.padEnd(78, " ");
 
-        // Hasta pos 441
-        linea = linea.padEnd(440, " ");
-        linea += "00000";
+            linea += tipoCuenta;
+            linea += "00000509";
+            linea += "1";
+            linea += "1";
 
-        // Hasta pos 841
-        linea = linea.padEnd(840, " ");
+            linea += "1";
 
-        lineas.push(linea);
-    });
+            linea += item.numeroDocumento;
+            linea = linea.padEnd(140, " ");
+            
+            linea += dato2;
+            linea = linea.padEnd(190, " ");
+            
+            linea += bancoInfo.dato3;
+            linea = linea.padEnd(240, " ");
+            
+            linea += item.noCuenta;
+            
+            while (linea.length < 340) linea += " ";
+            linea += dato6;
 
-    // Última línea
+            linea = linea.padEnd(440, " ");
+            linea += "00000";
+
+            linea = linea.padEnd(840, " ");
+            lineas.push(linea);
+        });
+    }
+
     let ultimoConsec = (parsedData.length + 2).toString().padStart(7, "0");
     let ultimaLinea = ultimoConsec + "99990001001";
     lineas.push(ultimaLinea);
@@ -577,9 +731,27 @@ function clearData() {
     btnExcel.disabled = true;
     btnSiesa.disabled = true;
     btnPlano.disabled = true;
+    isExcelMode = false;
 
     downloadButtons.style.display = 'none';
     errorMessage.style.display = 'none';
+    
+    // Reset table headers back to default TXT headers
+    const dataHead = document.getElementById('dataHead');
+    if(dataHead) {
+        dataHead.innerHTML = `
+            <tr>
+                <th>No.</th>
+                <th>No. Documento</th>
+                <th>Nombre Titular</th>
+                <th>No. Cuenta</th>
+                <th>Nombre Banco</th>
+                <th>Tipo Cuenta</th>
+                <th>Tipo Documento</th>
+                <th>Acciones</th>
+            </tr>
+        `;
+    }
 }
 
 /* ========================================
